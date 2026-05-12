@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Typography Experiment</title>
+    <style>
+        /* =========================================
+           === 配置区域 (CONFIGURATION VARIABLES) ===
+           你可以在这里自由调整所有动画与尺寸参数
+           ========================================= */
+        :root {
+            /* --- 1. 颜色与描边 --- */
+            --stroke-color: #8ed2f2;
+            --stroke-width: 1.5px;
+            --fill-color: #ffffff;
+            --text-color: #b7a180;
+            --rect-gap: 10px;
+            
+            /* --- 2. 响应式最大尺寸 (Desktop - 电脑端) --- */
+            /* 
+               正文的最小可用空间是由总视口减去这些最大值决定的。
+               例如高度：100vh - 42vh(上) - 45vh(下) = 13vh（约保留 13% 的高度给正文）
+               例如宽度：100vw - 80vw(右) = 20vw（保留 20% 的宽度给正文）
+            */
+            --desktop-top-max: 42vh;    /* 顶部矩形最大生长高度 */
+            --desktop-bottom-max: 45vh; /* 底部矩形最大生长高度 */
+            --desktop-right-max: 80vw;  /* 右侧矩形最大生长宽度 */
+
+            /* --- 3. 响应式最大尺寸 (Mobile - 手机端 <= 768px) --- */
+            --mobile-top-max: 30vh;
+            --mobile-bottom-max: 35vh;
+            --mobile-right-max: 75vw;
+
+            /* --- 4. 动画时间与错开节奏 (Animation Timing) --- */
+            /* Start-delay 保证加载 1 秒后才开始出现 */
+            --start-delay: 1s;
+            
+            /* 
+               不同步的生长循环周期。设置不同的秒数，
+               可以确保三个矩形呈现随机、此消彼长的视觉节奏，永远不会完全同步。
+            */
+            --duration-top: 20s;      /* 顶部矩形完成一次涨缩需要 9秒 */
+            --duration-right: 25s;   /* 右侧矩形需要 14秒 */
+            --duration-bottom: 30s;  /* 底部矩形需要 11秒 */
+        }
+
+        @media (max-width: 768px) {
+            /* 手机端覆盖尺寸变量 */
+            :root {
+                --top-max: var(--mobile-top-max);
+                --bottom-max: var(--mobile-bottom-max);
+                --right-max: var(--mobile-right-max);
+            }
+        }
+        @media (min-width: 769px) {
+            /* 电脑端覆盖尺寸变量 */
+            :root {
+                --top-max: var(--desktop-top-max);
+                --bottom-max: var(--desktop-bottom-max);
+                --right-max: var(--desktop-right-max);
+            }
+        }
+
+        /* =========================================
+           === 全局与布局样式 (GLOBAL & LAYOUT) ===
+           ========================================= */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: var(--fill-color);
+            overflow: hidden; /* 隐藏浏览器全局滚动条 */
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 中间行：包含左侧文本块与右侧占位符 */
+        #middle-row {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            min-height: 0; /* 允许 Flexbox 被外力挤压缩小 */
+        }
+
+        /* =========================================
+           === 正文模块 (TEXT MODULE) ===
+           ========================================= */
+        #text-container {
+            flex: 1;
+            min-width: 0; /* 允许 Flexbox 被向内无限挤压 */
+            overflow-y: auto; /* 允许内容区纵向滚动 */
+            display: flex;
+            justify-content: flex-start;
+            /* 动态内边距：保证缩到最小时依然有呼吸感 */
+            padding: clamp(20px, 6vh, 60px) clamp(20px, 5vw, 60px);
+            box-sizing: border-box;
+
+            /* 隐藏滚动条但保留滚动能力 */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        #text-container::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        /* 正文内容包装器，使内容偏左 */
+        .text-content {
+            max-width: 800px;
+            width: 100%;
+            margin: 0; /* 配合 flex-start 靠左对齐 */
+        }
+
+        .text-content p {
+            font-family: "PingFang SC Light", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            font-weight: 300;
+            font-size: 19px;
+            color: var(--text-color);
+            line-height: 20px; /* 行间距：字号 + 1px */
+            
+            text-align: left; /* 左对齐 */
+            text-justify: none; /* 拒绝两端对齐 */
+            
+            word-wrap: break-word;
+            overflow-wrap: break-word; /* 保证单词和边缘自动换行，不溢出 */
+            
+            margin-top: 0;
+            margin-bottom: 25px; /* 段落间距 */
+        }
+
+        /* =========================================
+           === 动态占位符 (DYNAMIC PLACEHOLDERS) ===
+           ========================================= */
+        /* 
+           Wrapper 负责改变空间大小（高度或宽度），
+           内部的 placeholder 则被动适应 Wrapper 大小。
+           这能完美避免 3px 边框在 size 为 0 时的页面跳闪。
+        */
+        .anim-wrapper {
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .placeholder {
+    /* ⬇️ 修改这三行：利用 calc() 减去间距，并用 margin 居中 */
+    width: calc(100% - var(--rect-gap));
+    height: calc(100% - var(--rect-gap));
+    margin: calc(var(--rect-gap) / 2);
+    
+    /* ⬇️ 以下原有属性保持不变 */
+    background-color: var(--fill-color);
+    box-sizing: border-box;
+    border: var(--stroke-width) solid var(--stroke-color);
+    
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25' preserveAspectRatio='none'%3E%3Cline x1='0' y1='0' x2='100%25' y2='100%25' stroke='%238ed2f2' stroke-width='1' vector-effect='non-scaling-stroke' /%3E%3Cline x1='100%25' y1='0' x2='0' y2='100%25' stroke='%238ed2f2' stroke-width='1' vector-effect='non-scaling-stroke' /%3E%3C/svg%3E");
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+        /* --- 动画关键帧定义 --- */
+        /* 
+           生长曲线：
+           0% -> 45% 生长到最大值
+           45% -> 90% 缩回 0
+           90% -> 100% 保持在 0（使其完全消失一会儿，形成呼吸感）
+        */
+        @keyframes growHeight {
+            0%   { height: 0; }
+            45%  { height: var(--max-size); }
+            90%  { height: 0; }
+            100% { height: 0; }
+        }
+
+        @keyframes growWidth {
+            0%   { width: 0; }
+            45%  { width: var(--max-size); }
+            90%  { width: 0; }
+            100% { width: 0; }
+        }
+
+        /* --- 单个矩形的具体调用 --- */
+        #wrap-top {
+            width: 100vw;
+            --max-size: var(--top-max);
+            /* animation-fill-mode: backwards; 保证在 1秒 延迟期间保持 0 尺寸 */
+            animation: growHeight var(--duration-top) ease-in-out var(--start-delay) infinite backwards;
+        }
+
+        #wrap-bottom {
+            width: 100vw;
+            --max-size: var(--bottom-max);
+            animation: growHeight var(--duration-bottom) ease-in-out var(--start-delay) infinite backwards;
+        }
+
+        #wrap-right {
+            height: 100%;
+            --max-size: var(--right-max);
+            animation: growWidth var(--duration-right) ease-in-out var(--start-delay) infinite backwards;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 上方横向矩形 -->
+    <div id="wrap-top" class="anim-wrapper">
+        <div class="placeholder"></div>
+    </div>
+
+    <!-- 中间行：正文区 与 右侧矩形 -->
+    <div id="middle-row">
+        
+        <!-- 正文模块 -->
+        <div id="text-container">
+            <div class="text-content">
+                <p>The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us. His grey eyes shone and twinkled, and his usually pale face was flushed and animated. The fire burned brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.</p>
+
+                <p>Our chairs, being his patents, embraced and caressed us rather than submitted to be sat upon, and there was that luxurious after-dinner atmosphere when thought roams gracefully free of the trammels of precision. And he put it to us in this way—marking the points with a lean forefinger—as we sat and lazily admired his earnestness over this new paradox.</p>
+
+                <p>“You must follow me carefully. I shall have to controvert one or two ideas that are almost universally accepted. The geometry, for instance, they taught you at school is founded on a misconception.”</p>
+
+                <p>“Is not that rather a large thing to expect us to begin upon?” said Filby, an argumentative person with red hair. “I do not mean to ask you to accept anything without reasonable ground for it. You will soon admit as much as I need from you.”</p>
+
+                <p>“You know of course that a mathematical line, a line of thickness nil, has no real existence. They taught you that? Neither has a mathematical plane. These things are mere abstractions. But what about a cube? Can a cube that does not last for any time at all, have a real existence?”</p>
+                
+                <p>Filby became pensive. “Clearly,” the Time Traveller proceeded, “any real body must have extension in four directions: it must have Length, Breadth, Thickness, and—Duration. But through a natural infirmity of the flesh, which I will explain to you in a moment, we incline to overlook this fact.”</p>
+
+                <p>“There are really four dimensions, three which we call the three planes of Space, and a fourth, Time. There is, however, a tendency to draw an unreal distinction between the former three dimensions and the latter, because it happens that our consciousness moves intermittently in one direction along the latter from the beginning to the end of our lives.”</p>
+            </div>
+        </div>
+
+        <!-- 右侧纵向矩形 -->
+        <div id="wrap-right" class="anim-wrapper">
+            <div class="placeholder"></div>
+        </div>
+
+    </div>
+
+    <!-- 下方横向矩形 -->
+    <div id="wrap-bottom" class="anim-wrapper">
+        <div class="placeholder"></div>
+    </div>
+
+</body>
+</html>
